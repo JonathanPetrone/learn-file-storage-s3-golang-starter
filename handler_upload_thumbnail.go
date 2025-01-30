@@ -1,10 +1,13 @@
 package main
 
 import (
-	"encoding/base64"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
 	"github.com/google/uuid"
@@ -47,16 +50,43 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	defer file.Close()
-	mediaType := header.Header.Get("Content-Type")
 
-	imageData, err := io.ReadAll(file)
+	contentType := header.Header.Get("Content-Type")
+	mediaType, _, err := mime.ParseMediaType(contentType)
 	if err != nil {
-		respondWithError(w, http.StatusBadRequest, "Unable to parse form file", err)
+		respondWithError(w, http.StatusBadRequest, "Invalid Content-Type header", err)
 		return
 	}
 
-	base64str := base64.StdEncoding.EncodeToString(imageData)
-	dataUrl := fmt.Sprintf("data:%s;base64,%s", mediaType, base64str)
+	if mediaType != "image/jpeg" && mediaType != "image/png" {
+		respondWithError(w, http.StatusBadRequest, "Only JPEG and PNG images are allowed", nil)
+		return
+	}
+
+	parts := strings.Split(mediaType, "/")
+	extension := parts[1]
+
+	filePath := filepath.Join(cfg.assetsRoot, fmt.Sprintf("%s.%s", videoID, extension))
+
+	err = os.MkdirAll(cfg.assetsRoot, 0755)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "couldn't create assets directory", err)
+		return
+	}
+
+	// Then create the file
+	newFile, err := os.Create(filePath)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "video could not be created", err)
+		return
+	}
+	defer newFile.Close()
+
+	_, err = io.Copy(newFile, file)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "couldn't copy file", err)
+		return
+	}
 
 	videoMetaData, err := cfg.db.GetVideo(videoID)
 	if err != nil {
@@ -69,7 +99,8 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	videoMetaData.ThumbnailURL = &dataUrl
+	thumbnailURL := fmt.Sprintf("http://localhost:%s/assets/%s.%s", cfg.port, videoID, extension)
+	videoMetaData.ThumbnailURL = &thumbnailURL
 
 	err = cfg.db.UpdateVideo(videoMetaData)
 	if err != nil {
