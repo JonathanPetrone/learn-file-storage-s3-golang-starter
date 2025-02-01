@@ -24,7 +24,7 @@ type apiConfig struct {
 	s3Region         string
 	s3CfDistribution string
 	port             string
-	s3client         *s3.Client
+	s3Client         *s3.Client
 }
 
 func main() {
@@ -81,7 +81,9 @@ func main() {
 	}
 
 	ctx := context.Background()
-	awsConfig, err := config.LoadDefaultConfig(ctx)
+	awsConfig, err := config.LoadDefaultConfig(ctx,
+		config.WithRegion(s3Region),
+	)
 	if err != nil {
 		// What do you think we should do if there's an error?
 		log.Fatal("couldnt load default config")
@@ -99,7 +101,7 @@ func main() {
 		s3Region:         s3Region,
 		s3CfDistribution: s3CfDistribution,
 		port:             port,
-		s3client:         s3Client,
+		s3Client:         s3Client,
 	}
 
 	err = cfg.ensureAssetsDir()

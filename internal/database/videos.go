@@ -153,3 +153,13 @@ func (c Client) DeleteVideo(id uuid.UUID) error {
 	_, err := c.db.Exec(query, id)
 	return err
 }
+
+func (c Client) UpdateVideoURL(videoID uuid.UUID, videoURL string) error {
+	query := `
+    UPDATE videos
+    SET video_url = ?
+    WHERE id = ?
+    `
+	_, err := c.db.Exec(query, videoURL, videoID)
+	return err
+}
