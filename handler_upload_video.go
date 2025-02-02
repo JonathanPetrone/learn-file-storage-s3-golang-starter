@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -135,11 +137,26 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	}
 	key := prefix + fmt.Sprintf("%x.mp4", randomHex)
 
+	// processing step
+	processedFilePath, err := processVideoForFastStart(tempFile.Name())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "couldn't process video for fast start", err)
+		return
+	}
+
+	processedFile, err := os.Open(processedFilePath)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "couldn't open processed video", err)
+		return
+	}
+	defer os.Remove(processedFilePath) // Clean up the processed file when done
+	defer processedFile.Close()
+
 	// Upload to S3
 	_, err = cfg.s3Client.PutObject(r.Context(), &s3.PutObjectInput{
 		Bucket:      aws.String(cfg.s3Bucket),
 		Key:         aws.String(key), // Use the key with prefix
-		Body:        tempFile,
+		Body:        processedFile,
 		ContentType: aws.String("video/mp4"),
 	})
 
@@ -201,4 +218,33 @@ func getVideoAspectRatio(filePath string) (string, error) {
 
 	// If neither, it's other
 	return "other", nil
+}
+
+func processVideoForFastStart(filePath string) (string, error) {
+	// Get the file's extension
+	ext := filepath.Ext(filePath)
+
+	// Remove the extension from the original path
+	base := strings.TrimSuffix(filePath, ext)
+
+	// Append '.processing' before the extension
+	outputFilePath := base + ".processing" + ext
+
+	// Create the ffmpeg command
+	cmd := exec.Command(
+		"ffmpeg",
+		"-i", filePath, // Input file
+		"-c", "copy", // Copy codec
+		"-movflags", "faststart", // Fast start flag
+		"-f", "mp4", // Output format
+		outputFilePath, // Output file path
+	)
+
+	// Run the command and capture any errors
+	if err := cmd.Run(); err != nil {
+		return "", err // Return the error if the command fails
+	}
+
+	// Return the constructed file path
+	return outputFilePath, nil
 }
