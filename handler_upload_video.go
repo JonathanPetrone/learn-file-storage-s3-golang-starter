@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
@@ -10,17 +9,14 @@ import (
 	"math"
 	"mime"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
-	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/database"
 	"github.com/google/uuid"
 )
 
@@ -57,6 +53,9 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		respondWithError(w, http.StatusNotFound, "video not found", err)
 		return
 	}
+
+	// Add debug line here
+	fmt.Printf("Debug: videoMetaData.UserID = %v, userID = %v\n", videoMetaData.UserID, userID)
 
 	if videoMetaData.UserID != userID {
 		respondWithError(w, http.StatusUnauthorized, "user is not video owner", err)
@@ -170,7 +169,8 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Create comma-delimited string of bucket and key
-	videoURL := fmt.Sprintf("%s,%s", cfg.s3Bucket, key)
+	videoURL := fmt.Sprintf("https://%s/%s", cfg.s3CfDistribution, key)
+	fmt.Printf("Debug: videoURL = %s\n", videoURL)
 
 	// Update video URL in database
 	err = cfg.db.UpdateVideoURL(uuid, videoURL)
@@ -186,14 +186,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Convert to signed video
-	signedVideo, err := cfg.dbVideoToSignedVideo(video)
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "couldn't generate signed URL", err)
-		return
-	}
-
-	respondWithJSON(w, http.StatusOK, signedVideo)
+	respondWithJSON(w, http.StatusOK, video)
 
 }
 
@@ -265,56 +258,4 @@ func processVideoForFastStart(filePath string) (string, error) {
 
 	// Return the constructed file path
 	return outputFilePath, nil
-}
-
-func generatePresignedURL(s3Client *s3.Client, bucket, key string, expireTime time.Duration) (string, error) {
-	// Create the presign client
-	presignClient := s3.NewPresignClient(s3Client)
-
-	// Create the presigned URL request
-	presignResult, err := presignClient.PresignGetObject(context.Background(), &s3.GetObjectInput{
-		Bucket: aws.String(bucket),
-		Key:    aws.String(key),
-	}, s3.WithPresignExpires(expireTime))
-
-	if err != nil {
-		return "", err
-	}
-
-	return presignResult.URL, nil
-}
-
-func (cfg *apiConfig) dbVideoToSignedVideo(video database.Video) (database.Video, error) {
-	if video.VideoURL == nil {
-		return video, nil
-	}
-
-	var bucket, key string
-	parts := strings.Split(*video.VideoURL, ",")
-
-	if len(parts) == 2 {
-		// New format: "bucket,key"
-		bucket, key = parts[0], parts[1]
-	} else {
-		// Old format: full URL
-		// Parse the S3 URL to extract bucket and key
-		u, err := url.Parse(*video.VideoURL)
-		if err != nil {
-			return video, fmt.Errorf("invalid video URL format")
-		}
-		// Extract bucket and key from URL
-		// Format: https://bucket-name.s3.region.amazonaws.com/key
-		hostParts := strings.Split(u.Host, ".")
-		bucket = hostParts[0]
-		key = strings.TrimPrefix(u.Path, "/")
-	}
-
-	signedURL, err := generatePresignedURL(cfg.s3Client, bucket, key, 15*time.Minute)
-	if err != nil {
-		return video, fmt.Errorf("couldn't generate presigned URL: %w", err)
-	}
-
-	videoWithSignedURL := video
-	videoWithSignedURL.VideoURL = &signedURL
-	return videoWithSignedURL, nil
 }

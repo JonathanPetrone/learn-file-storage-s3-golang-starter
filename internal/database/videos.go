@@ -160,6 +160,6 @@ func (c Client) UpdateVideoURL(videoID uuid.UUID, videoURL string) error {
     SET video_url = ?
     WHERE id = ?
     `
-	_, err := c.db.Exec(query, videoURL, videoID)
+	_, err := c.db.Exec(query, &videoURL, videoID)
 	return err
 }
